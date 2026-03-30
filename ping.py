@@ -1,4 +1,4 @@
-# Things to imrpove and add: Logging system, smoother program failure, support multiple type of input, more customizable inputs with their defaults, function seperation
+
 
 
 import scapy.all as scapy
