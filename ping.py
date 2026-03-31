@@ -1,14 +1,12 @@
-
-
-
 import scapy.all as scapy
-import time as time
-import argparse as argparse
-import socket as socket
+from scapy.all import ICMP
+import time
+import argparse
+import socket
 
 
 # For inputed IP error handling
-def ip_eh(ip):
+def resolve_ip(ip):
     try:
         ip = socket.gethostbyname(ip)
         return ip
@@ -17,25 +15,49 @@ def ip_eh(ip):
 
 
 # Create a Packet
-def cpkt(ip, TTL):
+def create_packet(ip, TTL):
     return scapy.IP(dst=ip, ttl=TTL) / scapy.ICMP()
 
 
 # Receive Response and return response + ms
-def sr_and_measure(pkt):
+def send_and_analyze(pkt):
     start = time.perf_counter()
     response = scapy.sr1(pkt, timeout=2, verbose=0)
     end = time.perf_counter()
 
-    if response:
-        ms = int((end - start) * 1000)
-        return response, ms
+    if not response:
+        return "drop", None, None
+
+    if not response.haslayer(ICMP):
+        return "non_icmp", None, None
     else:
-        return None, None
+        icmp = response[ICMP]
+
+    if icmp.type == 0:
+        ms = int((end - start) * 1000)
+        rec_ttl = response.ttl
+        return "success", ms, rec_ttl
+
+    elif icmp.type == 3:
+
+        if icmp.code == 0:
+            return "net_unreachable", None, None
+
+        elif icmp.code == 1:
+
+            return "host_unreachable", None, None
+        elif icmp.code == 3:
+
+            return "port_unreachable", None, None
+        else:
+            return "unknown", None, None
+    else:
+
+        return "unknown", None, None
 
 
 # RTTS calculation of avg, min, max
-def rttcal(rttslist):
+def rttcalculation(rttslist):
 
     if rttslist:
 
@@ -55,23 +77,35 @@ def ping(ip, ttlpkt, TTL):
     rttslist = []
     for seq in range(1, ttlpkt + 1):
         time.sleep(1)
-        response, ms = sr_and_measure(cpkt(ip, TTL))
+        status, ms, rec_ttl = send_and_analyze(create_packet(ip, TTL))
 
         sent += 1
 
-        if response:
+        if status == "success":
             receive += 1
-            rec_ttl = response.ttl
 
             print(f"Reply from {ip}: seq={seq}, TTL={rec_ttl}, time={ms}ms")
 
             rttslist.append(ms)
 
         else:
-            print("Request timed out")
-            lost += 1
+            receive += 1
+            if status == "net_unreachable":
+                print("Destination route unreachable")
+            elif status == "host_unreachable":
+                print("Host Unreachable")
+            elif status == "port_unreachable":
+                print("Port Unreachable")
+            elif status == "unknown":
+                print("Unknown issue")
+            elif status == "drop":
+                lost += 1
+                receive -= 1
+                print("No response (filtered / dropped)")
+            elif status == "non_icmp":
+                print("Non ICMP layer response")
 
-    avg_rtt, min_rtt, max_rtt = rttcal(rttslist)
+    avg_rtt, min_rtt, max_rtt = rttcalculation(rttslist)
 
     print("---Ping statistics---")
     print(f"Packet: Sent={sent}, Receive={receive}, Lost={lost}")
@@ -87,7 +121,7 @@ args = parser.parse_args()
 
 ttlpkt = int(args.packet)
 ttl = int(args.ttl)
-ip_check = ip_eh(args.ip)
+ip_check = resolve_ip(args.ip)
 
 if ip_check:
     ping(ip_check, ttlpkt, ttl)
